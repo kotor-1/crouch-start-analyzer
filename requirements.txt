@@ -1,5 +1,0 @@
-streamlit
-numpy
-mediapipe
-Pillow
-opencv-python-headless
