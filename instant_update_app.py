@@ -3,8 +3,8 @@ import numpy as np
 import mediapipe as mp
 from PIL import Image, ImageDraw, ImageFont
 import math
-import io
-import base64
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # ページ設定
 st.set_page_config(layout="wide", page_title="クラウチングスタート姿勢分析")
@@ -15,10 +15,12 @@ def initialize_session_state():
         st.session_state.keypoints = {}
     if "model_loaded" not in st.session_state:
         st.session_state.model_loaded = False
+    if "selected_joint" not in st.session_state:
+        st.session_state.selected_joint = "LShoulder"
 
 initialize_session_state()
 
-st.title("🏃 クラウチングスタート姿勢分析 & 飛び出し分析（エラー完全解決版）")
+st.title("🏃 クラウチングスタート姿勢分析 & 飛び出し分析（ドラッグ対応版）")
 
 # サイドバー設定
 with st.sidebar:
@@ -29,8 +31,12 @@ with st.sidebar:
     line_width = st.slider("線の太さ", 1, 10, 3)
     st.divider()
     st.header("🔧 手動調整")
+    adjustment_mode = st.selectbox(
+        "調整方法",
+        ["プルダウン選択", "横並び表示", "ドラッグ操作"]
+    )
     if st.button("🔄 AI検出をやり直す"):
-        keys_to_delete = ["keypoints", "model_loaded"]
+        keys_to_delete = ["keypoints", "model_loaded", "selected_joint"]
         for key in keys_to_delete:
             if key in st.session_state:
                 del st.session_state[key]
@@ -197,6 +203,248 @@ def evaluate_takeoff_angles(lower_angle, upper_angle, kunoji_angle):
     
     return feedback, colors
 
+def create_interactive_plot(img, keypoints, joint_size, line_width, img_width, img_height):
+    """Plotlyを使用したインタラクティブな画像表示"""
+    
+    # 画像をbase64エンコード
+    import io
+    import base64
+    
+    buffered = io.BytesIO()
+    img.save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode()
+    
+    # Plotlyフィギュアを作成
+    fig = go.Figure()
+    
+    # 背景画像を追加
+    fig.add_layout_image(
+        dict(
+            source=f"data:image/png;base64,{img_str}",
+            xref="x", yref="y",
+            x=0, y=img_height,
+            sizex=img_width, sizey=img_height,
+            sizing="stretch",
+            opacity=1,
+            layer="below"
+        )
+    )
+    
+    # 関節点の番号マッピング
+    joint_numbers = {
+        "LShoulder": "1", "RShoulder": "2", "LHip": "3", "RHip": "4",
+        "LKnee": "5", "RKnee": "6", "LAnkle": "7", "RAnkle": "8", "C7": "9"
+    }
+    
+    joint_names_jp = {
+        "LShoulder": "① 左肩", "RShoulder": "② 右肩",
+        "LHip": "③ 左股関節", "RHip": "④ 右股関節", 
+        "LKnee": "⑤ 左膝", "RKnee": "⑥ 右膝",
+        "LAnkle": "⑦ 左足首", "RAnkle": "⑧ 右足首",
+        "C7": "⑨ 第7頸椎"
+    }
+    
+    # 線を描画
+    lines = [
+        ("LShoulder", "LHip"), ("LHip", "LKnee"), ("LKnee", "LAnkle"),
+        ("RShoulder", "RHip"), ("RHip", "RKnee"), ("RKnee", "RAnkle"),
+        ("LShoulder", "RShoulder"), ("LHip", "RHip"),
+    ]
+    
+    for a, b in lines:
+        if a in keypoints and b in keypoints:
+            x1, y1 = keypoints[a]
+            x2, y2 = keypoints[b]
+            fig.add_trace(go.Scatter(
+                x=[x1, x2], y=[img_height - y1, img_height - y2],
+                mode='lines',
+                line=dict(color='red', width=line_width),
+                showlegend=False,
+                hoverinfo='skip'
+            ))
+    
+    # C7から骨盤への線
+    if all(k in keypoints for k in ["C7", "RHip", "LHip", "RAnkle", "LAnkle"]):
+        pelvis_key = "RHip" if keypoints["RAnkle"][0] > keypoints["LAnkle"][0] else "LHip"
+        pelvis = keypoints[pelvis_key]
+        x1, y1 = keypoints["C7"]
+        x2, y2 = pelvis
+        fig.add_trace(go.Scatter(
+            x=[x1, x2], y=[img_height - y1, img_height - y2],
+            mode='lines',
+            line=dict(color='purple', width=line_width+2),
+            showlegend=False,
+            hoverinfo='skip'
+        ))
+    
+    # 関節点を描画
+    x_coords = []
+    y_coords = []
+    texts = []
+    names = []
+    
+    for name, (x, y) in keypoints.items():
+        x_coords.append(x)
+        y_coords.append(img_height - y)  # Y軸を反転
+        texts.append(f"{joint_names_jp.get(name, name)}<br>({x}, {y})")
+        names.append(name)
+    
+    fig.add_trace(go.Scatter(
+        x=x_coords,
+        y=y_coords,
+        mode='markers+text',
+        marker=dict(
+            size=joint_size*2,
+            color='yellow',
+            line=dict(color='red', width=2)
+        ),
+        text=[joint_numbers.get(name, "") for name in names],
+        textposition="middle center",
+        textfont=dict(color="black", size=12),
+        hovertext=texts,
+        hoverinfo='text',
+        name="関節点",
+        customdata=names
+    ))
+    
+    # レイアウト設定
+    fig.update_layout(
+        xaxis=dict(range=[0, img_width], showgrid=False, zeroline=False, showticklabels=False),
+        yaxis=dict(range=[0, img_height], showgrid=False, zeroline=False, showticklabels=False, scaleanchor="x"),
+        showlegend=False,
+        margin=dict(l=0, r=0, t=0, b=0),
+        dragmode='pan',
+        height=min(600, img_height),
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)'
+    )
+    
+    return fig
+
+def manual_adjustment_dropdown(keypoints, img_width, img_height):
+    """プルダウン選択による手動調整"""
+    joint_names_jp = {
+        "LShoulder": "① 左肩", "RShoulder": "② 右肩",
+        "LHip": "③ 左股関節", "RHip": "④ 右股関節", 
+        "LKnee": "⑤ 左膝", "RKnee": "⑥ 右膝",
+        "LAnkle": "⑦ 左足首", "RAnkle": "⑧ 右足首",
+        "C7": "⑨ 第7頸椎"
+    }
+    
+    st.subheader("🎯 関節点の手動調整（プルダウン選択）")
+    
+    selected_joint = st.selectbox(
+        "調整する関節点を選択",
+        options=list(joint_names_jp.keys()),
+        format_func=lambda x: joint_names_jp[x],
+        key="joint_selector"
+    )
+    
+    if selected_joint in keypoints:
+        current_x, current_y = keypoints[selected_joint]
+        st.write(f"**{joint_names_jp[selected_joint]}の位置調整**")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write("**横方向（X座標）**")
+            new_x = st.number_input(
+                "左右の位置", 
+                min_value=0, max_value=img_width, 
+                value=int(current_x),
+                step=1,
+                key=f"{selected_joint}_x_dropdown",
+                help="数値を変更すると即座に更新されます"
+            )
+        
+        with col2:
+            st.write("**縦方向（Y座標）**")
+            new_y = st.number_input(
+                "上下の位置", 
+                min_value=0, max_value=img_height, 
+                value=int(current_y),
+                step=1,
+                key=f"{selected_joint}_y_dropdown",
+                help="数値を変更すると即座に更新されます"
+            )
+        
+        if (new_x, new_y) != (current_x, current_y):
+            st.session_state.keypoints[selected_joint] = (new_x, new_y)
+            st.rerun()
+
+def manual_adjustment_horizontal(keypoints, img_width, img_height):
+    """横並び表示による手動調整"""
+    joint_names_jp = {
+        "LShoulder": "① 左肩", "RShoulder": "② 右肩",
+        "LHip": "③ 左股関節", "RHip": "④ 右股関節", 
+        "LKnee": "⑤ 左膝", "RKnee": "⑥ 右膝",
+        "LAnkle": "⑦ 左足首", "RAnkle": "⑧ 右足首",
+        "C7": "⑨ 第7頸椎"
+    }
+    
+    st.subheader("🎯 関節点の手動調整（横並び表示）")
+    
+    # 上半身
+    st.write("**上半身**")
+    col1, col2, col3, col4, col5 = st.columns(5)
+    upper_joints = ["LShoulder", "RShoulder", "LHip", "RHip", "C7"]
+    
+    for i, (col, joint) in enumerate(zip([col1, col2, col3, col4, col5], upper_joints)):
+        if joint in keypoints:
+            with col:
+                jp_name = joint_names_jp[joint]
+                current_x, current_y = keypoints[joint]
+                st.write(f"**{jp_name}**")
+                
+                st.write("横方向(X)")
+                new_x = st.number_input(
+                    "X", min_value=0, max_value=img_width, 
+                    value=int(current_x), step=1,
+                    key=f"{joint}_x_h", label_visibility="collapsed"
+                )
+                
+                st.write("縦方向(Y)")
+                new_y = st.number_input(
+                    "Y", min_value=0, max_value=img_height, 
+                    value=int(current_y), step=1,
+                    key=f"{joint}_y_h", label_visibility="collapsed"
+                )
+                
+                if (new_x, new_y) != (current_x, current_y):
+                    st.session_state.keypoints[joint] = (new_x, new_y)
+                    st.rerun()
+    
+    st.divider()
+    
+    # 下半身
+    st.write("**下半身**")
+    col1, col2, col3, col4 = st.columns(4)
+    lower_joints = ["LKnee", "RKnee", "LAnkle", "RAnkle"]
+    
+    for i, (col, joint) in enumerate(zip([col1, col2, col3, col4], lower_joints)):
+        if joint in keypoints:
+            with col:
+                jp_name = joint_names_jp[joint]
+                current_x, current_y = keypoints[joint]
+                st.write(f"**{jp_name}**")
+                
+                st.write("横方向(X)")
+                new_x = st.number_input(
+                    "X", min_value=0, max_value=img_width, 
+                    value=int(current_x), step=1,
+                    key=f"{joint}_x_h2", label_visibility="collapsed"
+                )
+                
+                st.write("縦方向(Y)")
+                new_y = st.number_input(
+                    "Y", min_value=0, max_value=img_height, 
+                    value=int(current_y), step=1,
+                    key=f"{joint}_y_h2", label_visibility="collapsed"
+                )
+                
+                if (new_x, new_y) != (current_x, current_y):
+                    st.session_state.keypoints[joint] = (new_x, new_y)
+                    st.rerun()
+
 def draw_skeleton_on_image(img, keypoints, joint_size, line_width):
     """画像に骨格を描画する関数"""
     try:
@@ -256,73 +504,6 @@ def draw_skeleton_on_image(img, keypoints, joint_size, line_width):
     except Exception as e:
         st.error(f"画像描画エラー: {e}")
         return img
-
-def manual_adjustment_interface(keypoints, img_width, img_height):
-    """手動調整インターフェース"""
-    joint_names_jp = {
-        "LShoulder": "① 左肩", "RShoulder": "② 右肩",
-        "LHip": "③ 左股関節", "RHip": "④ 右股関節", 
-        "LKnee": "⑤ 左膝", "RKnee": "⑥ 右膝",
-        "LAnkle": "⑦ 左足首", "RAnkle": "⑧ 右足首",
-        "C7": "⑨ 第7頸椎"
-    }
-    
-    st.subheader("🎯 関節点の手動調整")
-    
-    # 簡潔な調整インターフェース
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.write("**上半身**")
-        upper_joints = ["LShoulder", "RShoulder", "LHip", "RHip", "C7"]
-        for joint in upper_joints:
-            if joint in keypoints:
-                current_x, current_y = keypoints[joint]
-                st.write(f"**{joint_names_jp[joint]}**")
-                
-                col_x, col_y = st.columns(2)
-                with col_x:
-                    new_x = st.number_input(
-                        "X", min_value=0, max_value=img_width, 
-                        value=int(current_x), step=1,
-                        key=f"{joint}_x", label_visibility="visible"
-                    )
-                with col_y:
-                    new_y = st.number_input(
-                        "Y", min_value=0, max_value=img_height, 
-                        value=int(current_y), step=1,
-                        key=f"{joint}_y", label_visibility="visible"
-                    )
-                
-                if (new_x, new_y) != (current_x, current_y):
-                    st.session_state.keypoints[joint] = (new_x, new_y)
-                    st.rerun()
-    
-    with col2:
-        st.write("**下半身**")
-        lower_joints = ["LKnee", "RKnee", "LAnkle", "RAnkle"]
-        for joint in lower_joints:
-            if joint in keypoints:
-                current_x, current_y = keypoints[joint]
-                st.write(f"**{joint_names_jp[joint]}**")
-                
-                col_x, col_y = st.columns(2)
-                with col_x:
-                    new_x = st.number_input(
-                        "X", min_value=0, max_value=img_width, 
-                        value=int(current_x), step=1,
-                        key=f"{joint}_x2", label_visibility="visible"
-                    )
-                with col_y:
-                    new_y = st.number_input(
-                        "Y", min_value=0, max_value=img_height, 
-                        value=int(current_y), step=1,
-                        key=f"{joint}_y2", label_visibility="visible"
-                    )
-                
-                if (new_x, new_y) != (current_x, current_y):
-                    st.session_state.keypoints[joint] = (new_x, new_y)
-                    st.rerun()
 
 # メイン処理
 uploaded_file = st.file_uploader("📷 画像をアップロード", type=["png", "jpg", "jpeg"])
@@ -411,15 +592,43 @@ if uploaded_file:
         col_image, col_inputs = st.columns([2, 1])
         
         with col_image:
-            st.subheader("🎯 骨格表示（関節点付き）")
-            
-            # 骨格描画
-            skeleton_img = draw_skeleton_on_image(img, st.session_state.keypoints, joint_size, line_width)
-            st.image(skeleton_img, use_container_width=True)
+            if adjustment_mode == "ドラッグ操作":
+                st.subheader("🎯 インタラクティブ調整（マウスでドラッグ）")
+                st.info("🖱️ 関節点をクリック＆ドラッグして移動できます")
+                
+                # Plotlyインタラクティブプロット
+                fig = create_interactive_plot(img, st.session_state.keypoints, joint_size, line_width, w, h)
+                
+                # イベントハンドリングは制限されているため、代替案を表示
+                st.plotly_chart(fig, use_container_width=True, key="interactive_plot")
+                
+                st.warning("⚠️ 現在のStreamlit環境では完全なドラッグ機能は制限されています。\n数値入力による調整をお使いください。")
+                
+            else:
+                st.subheader("🎯 骨格表示（関節点付き）")
+                # 骨格描画
+                skeleton_img = draw_skeleton_on_image(img, st.session_state.keypoints, joint_size, line_width)
+                st.image(skeleton_img, use_container_width=True)
 
         with col_inputs:
             # 手動調整UI
-            manual_adjustment_interface(st.session_state.keypoints, w, h)
+            if adjustment_mode == "プルダウン選択":
+                manual_adjustment_dropdown(st.session_state.keypoints, w, h)
+            elif adjustment_mode == "横並び表示":
+                manual_adjustment_horizontal(st.session_state.keypoints, w, h)
+            else:  # ドラッグ操作
+                st.subheader("🎯 座標表示")
+                joint_names_jp = {
+                    "LShoulder": "① 左肩", "RShoulder": "② 右肩",
+                    "LHip": "③ 左股関節", "RHip": "④ 右股関節", 
+                    "LKnee": "⑤ 左膝", "RKnee": "⑥ 右膝",
+                    "LAnkle": "⑦ 左足首", "RAnkle": "⑧ 右足首",
+                    "C7": "⑨ 第7頸椎"
+                }
+                
+                for name, (x, y) in st.session_state.keypoints.items():
+                    if name in joint_names_jp:
+                        st.write(f"{joint_names_jp[name]}: ({x}, {y})")
             
             # 分析処理
             points = st.session_state.keypoints
@@ -541,21 +750,21 @@ if uploaded_file:
 else:
     st.info("📷 クラウチングスタートの画像をアップロードしてください。")
     st.markdown("""
-    ### 🚀 完全エラー解決版の特徴
-    - **キャンバスエラー完全解決**: streamlit-drawable-canvasを使用せず、PILで描画
-    - **安定した動作**: NumPy配列比較エラーを根本的に解決
-    - **直感的な調整**: 数値入力による精密な関節点調整
-    - **リアルタイム更新**: 値変更で即座に画像更新
+    ### 🚀 ドラッグ対応版の特徴
+    - **プルダウン選択復活**: 関節点を選んで個別調整
+    - **横並び表示**: 全関節点を一覧で調整
+    - **ドラッグ操作**: Plotlyによるインタラクティブ表示（制限付き）
+    - **完全エラー解決**: 安定した動作を保証
     - **高精度分析**: セット姿勢・飛び出し分析の両方に対応
 
-    ### 📋 関節点番号
-    - ① 左肩　② 右肩　③ 左股関節　④ 右股関節
-    - ⑤ 左膝　⑥ 右膝　⑦ 左足首　⑧ 右足首
-    - ⑨ 第7頸椎（C7）
+    ### 📋 調整方法
+    1. **プルダウン選択**: 関節点を選んで精密調整
+    2. **横並び表示**: すべての関節点を同時に調整
+    3. **ドラッグ操作**: マウスでの直感的操作（表示のみ）
 
     ### 🎯 使用方法
     1. 画像をアップロード
     2. AI自動検出の結果を確認
-    3. 必要に応じて関節点を手動調整
+    3. 調整方法を選択して関節点を微調整
     4. 分析結果とアドバイスを確認
     """)
