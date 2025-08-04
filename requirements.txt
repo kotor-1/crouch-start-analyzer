@@ -3,3 +3,4 @@ numpy
 Pillow
 mediapipe==0.10.5
 opencv-python
+streamlit-drawable-canvas
