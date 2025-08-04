@@ -14,6 +14,8 @@ def initialize_session_state():
         st.session_state.keypoints = {}
     if "model_loaded" not in st.session_state:
         st.session_state.model_loaded = False
+    if "last_canvas_data" not in st.session_state:
+        st.session_state.last_canvas_data = None
 
 initialize_session_state()
 
@@ -32,10 +34,9 @@ with st.sidebar:
         ["プルダウン選択", "画像下部に横並び表示"]
     )
     if st.button("🔄 AI検出をやり直す"):
-        if "keypoints" in st.session_state:
-            del st.session_state["keypoints"]
-        if "model_loaded" in st.session_state:
-            del st.session_state["model_loaded"]
+        for key in ["keypoints", "model_loaded", "last_canvas_data"]:
+            if key in st.session_state:
+                del st.session_state[key]
         st.rerun()
 
 # MediaPipe初期化
@@ -279,18 +280,27 @@ def canvas_to_keypoints(objects, original_keypoints):
     
     return results
 
-def keypoints_changed(dict1, dict2):
-    """関節点の変更を検出（修正版）"""
+def safe_keypoints_comparison(dict1, dict2):
+    """完全に安全な関節点比較関数"""
     try:
-        # 辞書のキーが異なる場合
-        if set(dict1.keys()) != set(dict2.keys()):
+        # Noneチェック
+        if dict1 is None or dict2 is None:
             return True
         
-        # 各キーの値を比較
-        for key in dict1.keys():
-            # 両方の値を取得
-            val1 = dict1[key]
-            val2 = dict2[key]
+        # 型チェック
+        if not isinstance(dict1, dict) or not isinstance(dict2, dict):
+            return True
+        
+        # キーの比較
+        keys1 = set(dict1.keys())
+        keys2 = set(dict2.keys())
+        if keys1 != keys2:
+            return True
+        
+        # 各値の比較
+        for key in keys1:
+            val1 = dict1.get(key)
+            val2 = dict2.get(key)
             
             # None値の処理
             if val1 is None and val2 is None:
@@ -298,23 +308,33 @@ def keypoints_changed(dict1, dict2):
             if val1 is None or val2 is None:
                 return True
             
-            # タプルまたはリストの比較
-            if isinstance(val1, (tuple, list)) and isinstance(val2, (tuple, list)):
-                if len(val1) != len(val2):
-                    return True
-                # 各要素を個別に比較
-                for v1, v2 in zip(val1, val2):
-                    if abs(float(v1) - float(v2)) > 0.1:  # 小さな誤差は無視
+            # タプル/リストの比較
+            try:
+                if isinstance(val1, (tuple, list)) and isinstance(val2, (tuple, list)):
+                    if len(val1) != len(val2):
                         return True
-            else:
-                # その他の型の比較
-                if val1 != val2:
-                    return True
+                    
+                    # 数値比較（許容誤差付き）
+                    for v1, v2 in zip(val1, val2):
+                        diff = abs(float(v1) - float(v2))
+                        if diff > 1.0:  # 1ピクセル以上の差があれば変更とみなす
+                            return True
+                else:
+                    # その他の型
+                    if str(val1) != str(val2):
+                        return True
+            except (ValueError, TypeError):
+                # 変換エラーが発生した場合は変更ありとして扱う
+                return True
         
         return False
-    except Exception as e:
-        # エラーが発生した場合は変更ありとして扱う
+    except Exception:
+        # 何らかのエラーが発生した場合は変更ありとして扱う
         return True
+
+def create_canvas_key():
+    """キャンバス用のユニークキーを生成"""
+    return f"canvas_{len(st.session_state.keypoints)}_{hash(str(st.session_state.keypoints)) % 10000}"
 
 def manual_adjustment_dropdown(keypoints, img_width, img_height):
     """プルダウン選択による手動調整"""
@@ -533,6 +553,8 @@ if uploaded_file:
             
             # キャンバス描画
             objects = keypoints_to_canvas_objects(st.session_state.keypoints, joint_size)
+            canvas_key = create_canvas_key()
+            
             canvas_result = st_canvas(
                 fill_color="rgba(255, 165, 0, 0.3)",
                 stroke_width=2,
@@ -542,17 +564,22 @@ if uploaded_file:
                 width=w,
                 drawing_mode="transform",
                 initial_drawing=objects,
-                key="dragcanvas",
+                key=canvas_key,
             )
             
-            # キャンバスからの更新を反映（修正版）
+            # キャンバスからの更新を反映（完全修正版）
             if canvas_result.json_data is not None and "objects" in canvas_result.json_data:
                 try:
                     new_points = canvas_to_keypoints(canvas_result.json_data["objects"], st.session_state.keypoints)
-                    if keypoints_changed(new_points, st.session_state.keypoints):
+                    
+                    # 安全な比較を使用
+                    if safe_keypoints_comparison(new_points, st.session_state.keypoints):
                         st.session_state.keypoints = new_points
+                        # キャンバスデータを保存
+                        st.session_state.last_canvas_data = canvas_result.json_data
+                
                 except Exception as e:
-                    # キャンバス更新エラーは無視（ログ出力のみ）
+                    # キャンバス更新エラーは静かに無視
                     pass
 
         with col_inputs:
@@ -689,7 +716,7 @@ else:
     - **角度修正**: モードによって地面や「くの字」などの角度を計算
     - **番号表記**: 関節点の横に1,2,3...の番号を表示
     - **エラーハンドリング強化**: 安定性向上とエラー対策完備
-    - **NumPy配列エラー修正**: 配列比較の問題を解決
+    - **NumPy配列エラー完全修正**: 配列比較の問題を根本解決
 
     ### 📋 関節点番号
     - ① 左肩　② 右肩　③ 左股関節　④ 右股関節
