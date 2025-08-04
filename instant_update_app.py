@@ -2,10 +2,11 @@ import streamlit as st
 import numpy as np
 import mediapipe as mp
 from PIL import Image, ImageDraw, ImageFont
+from streamlit_drawable_canvas import st_canvas
 import math
 
 st.set_page_config(layout="wide")
-st.title("🏃 クラウチングスタート姿勢分析 & 飛び出し分析（即座更新版）")
+st.title("🏃 クラウチングスタート姿勢分析 & 飛び出し分析（ドラッグ調整対応版）")
 
 with st.sidebar:
     st.header("設定")
@@ -123,71 +124,66 @@ def evaluate_takeoff_angles(lower_angle, upper_angle, kunoji_angle):
             colors[2] = "success"
     return feedback, colors
 
-def draw_pose_on_image(img, keypoints, joint_size):
-    try:
-        new_img = img.copy()
-        draw = ImageDraw.Draw(new_img)
-        joint_numbers = {
-            "LShoulder": "1", "RShoulder": "2",
-            "LHip": "3", "RHip": "4", 
-            "LKnee": "5", "RKnee": "6",
-            "LAnkle": "7", "RAnkle": "8",
-            "C7": "9"
-        }
-        lines = [
-            ("LShoulder", "LHip"), ("LHip", "LKnee"), ("LKnee", "LAnkle"),
-            ("RShoulder", "RHip"), ("RHip", "RKnee"), ("RKnee", "RAnkle"),
-            ("LShoulder", "RShoulder"), ("LHip", "RHip"),
-        ]
-        for a, b in lines:
-            if a in keypoints and b in keypoints:
-                try:
-                    x1, y1 = keypoints[a]
-                    x2, y2 = keypoints[b]
-                    draw.line([(int(x1), int(y1)), (int(x2), int(y2))], fill="red", width=3)
-                except:
-                    continue
-        # C7-骨盤線 (C7→前側の股関節)
-        if "C7" in keypoints:
-            if "RHip" in keypoints and "LHip" in keypoints and "RAnkle" in keypoints and "LAnkle" in keypoints:
-                if keypoints["RAnkle"][0] > keypoints["LAnkle"][0]:
-                    pelvis = keypoints["RHip"]
-                else:
-                    pelvis = keypoints["LHip"]
-                x1, y1 = keypoints["C7"]
-                x2, y2 = pelvis
-                draw.line([(int(x1), int(y1)), (int(x2), int(y2))], fill="purple", width=5)
-        for name, (x, y) in keypoints.items():
-            if name in joint_numbers:
-                try:
-                    radius = max(joint_size // 2, 6)
-                    x, y = int(x), int(y)
-                    draw.ellipse([x-radius, y-radius, x+radius, y+radius], 
-                               fill="yellow", outline="red", width=3)
-                    number = joint_numbers[name]
-                    text_radius = 12
-                    text_x = x + radius + 15
-                    text_y = y
-                    draw.ellipse([
-                        text_x - text_radius, text_y - text_radius,
-                        text_x + text_radius, text_y + text_radius
-                    ], fill="white", outline="black", width=2)
-                    try:
-                        font = ImageFont.truetype("arial.ttf", 16)
-                    except:
-                        font = ImageFont.load_default()
-                    bbox = draw.textbbox((0, 0), number, font=font)
-                    text_width = bbox[2] - bbox[0]
-                    text_height = bbox[3] - bbox[1]
-                    draw.text((
-                        text_x - text_width // 2, 
-                        text_y - text_height // 2
-                    ), number, fill="black", font=font)
-                except Exception:
-                    draw.text((x+radius+5, y-10), joint_numbers[name], fill="black")
-        return new_img
-    except:
-        return img
+def keypoints_to_canvas_objects(keypoints, joint_size):
+    # 点と線をcanvas初期値用 objectsリストに変換
+    objects = []
+    joint_numbers = {
+        "LShoulder": "1", "RShoulder": "2", "LHip": "3", "RHip": "4",
+        "LKnee": "5", "RKnee": "6", "LAnkle": "7", "RAnkle": "8", "C7": "9"
+    }
+    # 点
+    for name, (x, y) in keypoints.items():
+        objects.append({
+            "type": "circle",
+            "left": x,
+            "top": y,
+            "radius": joint_size,
+            "fill": "yellow",
+            "stroke": "red",
+            "strokeWidth": 3,
+            "name": name,
+            "label": joint_numbers.get(name, "")
+        })
+    # 線
+    # 主要な骨格連結
+    lines = [
+        ("LShoulder", "LHip"), ("LHip", "LKnee"), ("LKnee", "LAnkle"),
+        ("RShoulder", "RHip"), ("RHip", "RKnee"), ("RKnee", "RAnkle"),
+        ("LShoulder", "RShoulder"), ("LHip", "RHip"),
+    ]
+    for a, b in lines:
+        if a in keypoints and b in keypoints:
+            objects.append({
+                "type": "line",
+                "x1": keypoints[a][0],
+                "y1": keypoints[a][1],
+                "x2": keypoints[b][0],
+                "y2": keypoints[b][1],
+                "stroke": "red",
+                "strokeWidth": 3,
+            })
+    # C7-骨盤線
+    if "C7" in keypoints:
+        if "RHip" in keypoints and "LHip" in keypoints and "RAnkle" in keypoints and "LAnkle" in keypoints:
+            pelvis = keypoints["RHip"] if keypoints["RAnkle"][0] > keypoints["LAnkle"][0] else keypoints["LHip"]
+            objects.append({
+                "type": "line",
+                "x1": keypoints["C7"][0],
+                "y1": keypoints["C7"][1],
+                "x2": pelvis[0],
+                "y2": pelvis[1],
+                "stroke": "purple",
+                "strokeWidth": 5,
+            })
+    return objects
+
+def canvas_to_keypoints(objects, original_keypoints):
+    # canvasオブジェクトから点の座標だけを抽出してkeypoints(dict)に反映
+    results = original_keypoints.copy()
+    for obj in objects:
+        if obj.get("type") == "circle" and "name" in obj:
+            results[obj["name"]] = (int(obj["left"]), int(obj["top"]))
+    return results
 
 def manual_adjustment_dropdown(keypoints, img_width, img_height):
     joint_names_jp = {
@@ -347,9 +343,25 @@ if uploaded_file:
         # --- 横並びレイアウト ---
         col_image, col_inputs = st.columns([2,1])
         with col_image:
-            current_result = draw_pose_on_image(img, st.session_state.keypoints, joint_size)
-            st.subheader("🎯 現在の関節点")
-            st.image(current_result, caption="現在の関節点位置", use_column_width=True)
+            st.subheader("🎯 画像上の関節点（ドラッグで移動可）")
+            objects = keypoints_to_canvas_objects(st.session_state.keypoints, joint_size)
+            canvas_result = st_canvas(
+                fill_color="rgba(255, 165, 0, 0.3)",
+                stroke_width=2,
+                background_image=img,
+                update_streamlit=True,
+                height=h,
+                width=w,
+                drawing_mode="transform",
+                initial_drawing=objects,
+                key="dragcanvas",
+            )
+            # ドラッグ後の座標を反映
+            if canvas_result.json_data is not None and "objects" in canvas_result.json_data:
+                new_points = canvas_to_keypoints(canvas_result.json_data["objects"], st.session_state.keypoints)
+                if new_points != st.session_state.keypoints:
+                    st.session_state.keypoints = new_points
+
         with col_inputs:
             if adjustment_mode == "プルダウン選択":
                 manual_adjustment_dropdown(st.session_state.keypoints, w, h)
