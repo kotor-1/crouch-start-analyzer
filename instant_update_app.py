@@ -349,17 +349,18 @@ if uploaded_file:
                 initial_drawing=objects,
                 key="dragcanvas",
             )
-            # ドラッグ後の座標を反映（NumPy配列の比較エラー対策）
+            # -- ここが一番のポイント！ --
             if canvas_result.json_data is not None and "objects" in canvas_result.json_data:
                 new_points = canvas_to_keypoints(canvas_result.json_data["objects"], st.session_state.keypoints)
-                def dict_tuple_diff(d1, d2):
-                    for k in d1:
-                        v1 = tuple(d1[k])
-                        v2 = tuple(d2.get(k, (-9999, -9999)))
+                def keypoints_changed(dict1, dict2):
+                    keys = set(dict1) | set(dict2)
+                    for k in keys:
+                        v1 = tuple(dict1[k]) if k in dict1 else None
+                        v2 = tuple(dict2[k]) if k in dict2 else None
                         if v1 != v2:
                             return True
                     return False
-                if dict_tuple_diff(new_points, st.session_state.keypoints):
+                if keypoints_changed(new_points, st.session_state.keypoints):
                     st.session_state.keypoints = new_points
 
         with col_inputs:
