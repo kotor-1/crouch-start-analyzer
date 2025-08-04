@@ -304,8 +304,50 @@ def create_clickable_plot(img_pil, keypoints, joint_size, line_width, img_width,
         st.error(f"プロット作成エラー: {e}")
         return None
 
-def quick_adjustment_controls(selected_joint, keypoints, img_width, img_height):
-    """クイック調整コントロール"""
+def precise_adjustment_controls(selected_joint, keypoints, img_width, img_height):
+    """精密調整コントロール（数値入力のみ）- クリック選択モード用"""
+    if not selected_joint or selected_joint not in keypoints:
+        st.info("👆 下のボタンから関節点を選択してください")
+        return
+    
+    joint_names_jp = {
+        "LShoulder": "① 左肩", "RShoulder": "② 右肩",
+        "LHip": "③ 左股関節", "RHip": "④ 右股関節", 
+        "LKnee": "⑤ 左膝", "RKnee": "⑥ 右膝",
+        "LAnkle": "⑦ 左足首", "RAnkle": "⑧ 右足首",
+        "C7": "⑨ 第7頸椎"
+    }
+    
+    current_x, current_y = keypoints[selected_joint]
+    
+    st.success(f"🎯 選択中: **{joint_names_jp.get(selected_joint, selected_joint)}**")
+    
+    # 精密調整のみ（方向キーは表示しない）
+    st.write("**📐 精密調整**")
+    col_x, col_y = st.columns(2)
+    
+    with col_x:
+        new_x = st.number_input(
+            "X座標", 
+            min_value=0, max_value=img_width, 
+            value=current_x, step=1,
+            key=f"{selected_joint}_precise_x"
+        )
+    
+    with col_y:
+        new_y = st.number_input(
+            "Y座標", 
+            min_value=0, max_value=img_height, 
+            value=current_y, step=1,
+            key=f"{selected_joint}_precise_y"
+        )
+    
+    if (new_x, new_y) != (current_x, current_y):
+        st.session_state.keypoints[selected_joint] = (new_x, new_y)
+        st.rerun()
+
+def direction_key_adjustment_controls(selected_joint, keypoints, img_width, img_height):
+    """方向キー調整コントロール - 方向キーモード用"""
     if not selected_joint or selected_joint not in keypoints:
         st.info("👆 下のボタンから関節点を選択してください")
         return
@@ -357,7 +399,7 @@ def quick_adjustment_controls(selected_joint, keypoints, img_width, img_height):
                 st.session_state.keypoints[selected_joint] = (current_x, new_y)
                 st.rerun()
     
-    # 精密調整
+    # 精密調整も併用可能
     st.divider()
     st.write("**📐 精密調整**")
     col_x, col_y = st.columns(2)
@@ -367,7 +409,7 @@ def quick_adjustment_controls(selected_joint, keypoints, img_width, img_height):
             "X座標", 
             min_value=0, max_value=img_width, 
             value=current_x, step=1,
-            key=f"{selected_joint}_precise_x"
+            key=f"{selected_joint}_direction_precise_x"
         )
     
     with col_y:
@@ -375,12 +417,88 @@ def quick_adjustment_controls(selected_joint, keypoints, img_width, img_height):
             "Y座標", 
             min_value=0, max_value=img_height, 
             value=current_y, step=1,
-            key=f"{selected_joint}_precise_y"
+            key=f"{selected_joint}_direction_precise_y"
         )
     
     if (new_x, new_y) != (current_x, current_y):
         st.session_state.keypoints[selected_joint] = (new_x, new_y)
         st.rerun()
+
+def joint_selection_buttons(keypoints):
+    """関節点選択ボタンを表示する共通関数"""
+    joint_names_jp = {
+        "LShoulder": "① 左肩", "RShoulder": "② 右肩",
+        "LHip": "③ 左股関節", "RHip": "④ 右股関節", 
+        "LKnee": "⑤ 左膝", "RKnee": "⑥ 右膝",
+        "LAnkle": "⑦ 左足首", "RAnkle": "⑧ 右足首",
+        "C7": "⑨ 第7頸椎"
+    }
+    
+    st.write("**🖱️ 関節点リスト（クリックで選択）**")
+    cols = st.columns(3)
+    joint_list = list(keypoints.keys())
+    
+    for i, joint in enumerate(joint_list):
+        with cols[i % 3]:
+            button_type = "primary" if joint == st.session_state.selected_joint else "secondary"
+            if st.button(
+                joint_names_jp.get(joint, joint),
+                key=f"select_{joint}",
+                type=button_type
+            ):
+                st.session_state.selected_joint = joint
+                st.rerun()
+
+def bulk_adjustment_controls(keypoints, img_width, img_height):
+    """一括表示・調整コントロール - 一括表示モード用"""
+    joint_names_jp = {
+        "LShoulder": "① 左肩", "RShoulder": "② 右肩",
+        "LHip": "③ 左股関節", "RHip": "④ 右股関節", 
+        "LKnee": "⑤ 左膝", "RKnee": "⑥ 右膝",
+        "LAnkle": "⑦ 左足首", "RAnkle": "⑧ 右足首",
+        "C7": "⑨ 第7頸椎"
+    }
+    
+    st.subheader("🎯 全関節点の一括調整")
+    st.info("💡 全ての関節点を横並びで同時表示・調整できます")
+    
+    # 3列で全関節点を表示
+    cols = st.columns(3)
+    joint_list = list(keypoints.keys())
+    
+    for i, joint in enumerate(joint_list):
+        with cols[i % 3]:
+            current_x, current_y = keypoints[joint]
+            
+            st.write(f"**{joint_names_jp.get(joint, joint)}**")
+            
+            # X座標調整
+            new_x = st.number_input(
+                "X座標", 
+                min_value=0, max_value=img_width, 
+                value=int(current_x),
+                step=1,
+                key=f"{joint}_bulk_x",
+                help="横方向の位置"
+            )
+            
+            # Y座標調整
+            new_y = st.number_input(
+                "Y座標", 
+                min_value=0, max_value=img_height, 
+                value=int(current_y),
+                step=1,
+                key=f"{joint}_bulk_y",
+                help="縦方向の位置"
+            )
+            
+            # 座標が変更された場合は即座に更新
+            if (new_x, new_y) != (current_x, current_y):
+                st.session_state.keypoints[joint] = (new_x, new_y)
+                st.rerun()
+            
+            # 現在位置表示
+            st.caption(f"現在: ({current_x}, {current_y})")
 
 def manual_adjustment_dropdown(keypoints, img_width, img_height):
     """プルダウン選択による手動調整"""
@@ -394,12 +512,24 @@ def manual_adjustment_dropdown(keypoints, img_width, img_height):
     
     st.subheader("🎯 関節点の手動調整（プルダウン選択）")
     
+    # デフォルト選択は現在選択されている関節点にする
+    current_selection_index = 0
+    if st.session_state.selected_joint and st.session_state.selected_joint in keypoints:
+        joint_list = list(joint_names_jp.keys())
+        if st.session_state.selected_joint in joint_list:
+            current_selection_index = joint_list.index(st.session_state.selected_joint)
+    
     selected_joint = st.selectbox(
         "調整する関節点を選択",
         options=list(joint_names_jp.keys()),
         format_func=lambda x: joint_names_jp[x],
+        index=current_selection_index,
         key="joint_selector"
     )
+    
+    # 選択が変更された場合はsession_stateを更新
+    if selected_joint != st.session_state.selected_joint:
+        st.session_state.selected_joint = selected_joint
     
     if selected_joint in keypoints:
         current_x, current_y = keypoints[selected_joint]
@@ -577,36 +707,31 @@ if uploaded_file:
         with col_image:
             if adjustment_mode == "❶ クリック選択":
                 st.subheader("🎯 関節点をクリックして選択")
-                st.info("💡 関節点をクリック → 右側で微調整")
+                st.info("💡 関節点をクリック → 右側で数値による精密調整")
                 
                 fig = create_clickable_plot(img, st.session_state.keypoints, joint_size, line_width, w, h)
                 if fig:
                     st.plotly_chart(fig, use_container_width=True, key="clickable_plot")
                 
                 # 関節点選択ボタン
-                st.write("**🖱️ 関節点リスト（クリックで選択）**")
-                joint_names_jp = {
-                    "LShoulder": "① 左肩", "RShoulder": "② 右肩",
-                    "LHip": "③ 左股関節", "RHip": "④ 右股関節", 
-                    "LKnee": "⑤ 左膝", "RKnee": "⑥ 右膝",
-                    "LAnkle": "⑦ 左足首", "RAnkle": "⑧ 右足首",
-                    "C7": "⑨ 第7頸椎"
-                }
-                
-                cols = st.columns(3)
-                joint_list = list(st.session_state.keypoints.keys())
-                for i, joint in enumerate(joint_list):
-                    with cols[i % 3]:
-                        button_type = "primary" if joint == st.session_state.selected_joint else "secondary"
-                        if st.button(
-                            joint_names_jp.get(joint, joint),
-                            key=f"select_{joint}",
-                            type=button_type
-                        ):
-                            st.session_state.selected_joint = joint
-                            st.rerun()
+                joint_selection_buttons(st.session_state.keypoints)
             
             elif adjustment_mode == "❂ プルダウン選択":
+                st.subheader("🎯 骨格表示（関節点付き）")
+                skeleton_img = draw_skeleton_on_image(img, st.session_state.keypoints, joint_size, line_width)
+                st.image(skeleton_img, use_container_width=True)
+            
+            elif adjustment_mode == "❸ 方向キー調整":
+                st.subheader("🎯 方向キーで関節点を調整")
+                st.info("💡 関節点を選択 → 方向キー（🔼▶️🔽◀️）で移動")
+                
+                skeleton_img = draw_skeleton_on_image(img, st.session_state.keypoints, joint_size, line_width)
+                st.image(skeleton_img, use_container_width=True)
+                
+                # 関節点選択ボタン
+                joint_selection_buttons(st.session_state.keypoints)
+            
+            elif adjustment_mode == "❹ 一括表示":
                 st.subheader("🎯 骨格表示（関節点付き）")
                 skeleton_img = draw_skeleton_on_image(img, st.session_state.keypoints, joint_size, line_width)
                 st.image(skeleton_img, use_container_width=True)
@@ -618,9 +743,13 @@ if uploaded_file:
         
         with col_inputs:
             if adjustment_mode == "❶ クリック選択":
-                quick_adjustment_controls(st.session_state.selected_joint, st.session_state.keypoints, w, h)
+                precise_adjustment_controls(st.session_state.selected_joint, st.session_state.keypoints, w, h)
             elif adjustment_mode == "❂ プルダウン選択":
                 manual_adjustment_dropdown(st.session_state.keypoints, w, h)
+            elif adjustment_mode == "❸ 方向キー調整":
+                direction_key_adjustment_controls(st.session_state.selected_joint, st.session_state.keypoints, w, h)
+            elif adjustment_mode == "❹ 一括表示":
+                bulk_adjustment_controls(st.session_state.keypoints, w, h)
             
             # 分析処理
             points = st.session_state.keypoints
@@ -742,22 +871,22 @@ if uploaded_file:
 else:
     st.info("📷 クラウチングスタートの画像をアップロードしてください。")
     st.markdown("""
-    ### 🎯 実用的な調整機能
+    ### 🎯 4つの調整モード
     
-    **❶ クリック選択**: 関節点ボタンをクリック → 方向キーで移動
-    **❂ プルダウン選択**: 従来通りの選択方式  
-    **❸ 方向キー調整**: ゲーム感覚で微調整
-    **❹ 一括表示**: 全関節点を同時表示
+    **❶ クリック選択モード**: 関節点ボタンをクリック → 数値入力による精密調整のみ
+    **❂ プルダウン選択モード**: プルダウンで関節点選択 → 数値入力による調整  
+    **❸ 方向キー調整モード**: 関節点選択 → 方向キー（🔼▶️🔽◀️）で移動 + 数値調整
+    **❹ 一括表示モード**: 全関節点を横並びで同時表示・調整
     
     ### 💡 推奨使用方法
     1. AI自動検出で大まかな位置を取得
-    2. クリック選択で関節点を選ぶ  
-    3. 方向キー（🔼▶️🔽◀️）で素早く調整
-    4. 精密調整で最終微調整
+    2. 調整モードを選択
+    3. 関節点を選択して調整
+    4. 各モードで最適な調整方法を活用
     
     ### 🚀 特徴
-    - **エラー完全解決**: NumPy配列エラーなし
-    - **直感的操作**: ボタンクリック + 方向キー
+    - **モード完全分離**: 各モードで適切なUIのみ表示
+    - **関節点選択共有**: モード間で選択状態を共有
     - **高精度分析**: セット姿勢・飛び出し分析
     - **リアルタイム更新**: 即座に結果反映
     """)
