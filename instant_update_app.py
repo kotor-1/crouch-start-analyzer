@@ -125,13 +125,11 @@ def evaluate_takeoff_angles(lower_angle, upper_angle, kunoji_angle):
     return feedback, colors
 
 def keypoints_to_canvas_objects(keypoints, joint_size):
-    # 点と線をcanvas初期値用 objectsリストに変換
     objects = []
     joint_numbers = {
         "LShoulder": "1", "RShoulder": "2", "LHip": "3", "RHip": "4",
         "LKnee": "5", "RKnee": "6", "LAnkle": "7", "RAnkle": "8", "C7": "9"
     }
-    # 点
     for name, (x, y) in keypoints.items():
         objects.append({
             "type": "circle",
@@ -144,7 +142,6 @@ def keypoints_to_canvas_objects(keypoints, joint_size):
             "name": name,
             "label": joint_numbers.get(name, "")
         })
-    # 線
     lines = [
         ("LShoulder", "LHip"), ("LHip", "LKnee"), ("LKnee", "LAnkle"),
         ("RShoulder", "RHip"), ("RHip", "RKnee"), ("RKnee", "RAnkle"),
@@ -161,7 +158,6 @@ def keypoints_to_canvas_objects(keypoints, joint_size):
                 "stroke": "red",
                 "strokeWidth": 3,
             })
-    # C7-骨盤線
     if "C7" in keypoints:
         if "RHip" in keypoints and "LHip" in keypoints and "RAnkle" in keypoints and "LAnkle" in keypoints:
             pelvis = keypoints["RHip"] if keypoints["RAnkle"][0] > keypoints["LAnkle"][0] else keypoints["LHip"]
@@ -177,7 +173,6 @@ def keypoints_to_canvas_objects(keypoints, joint_size):
     return objects
 
 def canvas_to_keypoints(objects, original_keypoints):
-    # canvasオブジェクトから点の座標だけを抽出してkeypoints(dict)に反映
     results = original_keypoints.copy()
     for obj in objects:
         if obj.get("type") == "circle" and "name" in obj:
@@ -357,15 +352,14 @@ if uploaded_file:
             # ドラッグ後の座標を反映（NumPy配列の比較エラー対策）
             if canvas_result.json_data is not None and "objects" in canvas_result.json_data:
                 new_points = canvas_to_keypoints(canvas_result.json_data["objects"], st.session_state.keypoints)
-                changed = False
-                # 比較はtuple同士で
-                for k in new_points:
-                    v_new = tuple(new_points[k])
-                    v_old = tuple(st.session_state.keypoints.get(k, (-1, -1)))
-                    if v_new != v_old:
-                        changed = True
-                        break
-                if changed:
+                def dict_tuple_diff(d1, d2):
+                    for k in d1:
+                        v1 = tuple(d1[k])
+                        v2 = tuple(d2.get(k, (-9999, -9999)))
+                        if v1 != v2:
+                            return True
+                    return False
+                if dict_tuple_diff(new_points, st.session_state.keypoints):
                     st.session_state.keypoints = new_points
 
         with col_inputs:
