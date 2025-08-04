@@ -1,7 +1,7 @@
 import streamlit as st
 import numpy as np
 import mediapipe as mp
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 from streamlit_drawable_canvas import st_canvas
 import math
 
@@ -145,7 +145,6 @@ def keypoints_to_canvas_objects(keypoints, joint_size):
             "label": joint_numbers.get(name, "")
         })
     # 線
-    # 主要な骨格連結
     lines = [
         ("LShoulder", "LHip"), ("LHip", "LKnee"), ("LKnee", "LAnkle"),
         ("RShoulder", "RHip"), ("RHip", "RKnee"), ("RKnee", "RAnkle"),
@@ -340,12 +339,10 @@ if uploaded_file:
                         }
                         st.session_state.keypoints = default_positions
 
-        # --- 横並びレイアウト ---
         col_image, col_inputs = st.columns([2,1])
         with col_image:
             st.subheader("🎯 画像上の関節点（ドラッグで移動可）")
             objects = keypoints_to_canvas_objects(st.session_state.keypoints, joint_size)
-            # ↓↓↓★★★ ここでbackground_imageにimg_npを渡す！ ★★★↓↓↓
             canvas_result = st_canvas(
                 fill_color="rgba(255, 165, 0, 0.3)",
                 stroke_width=2,
@@ -357,10 +354,18 @@ if uploaded_file:
                 initial_drawing=objects,
                 key="dragcanvas",
             )
-            # ドラッグ後の座標を反映
+            # ドラッグ後の座標を反映（NumPy配列の比較エラー対策）
             if canvas_result.json_data is not None and "objects" in canvas_result.json_data:
                 new_points = canvas_to_keypoints(canvas_result.json_data["objects"], st.session_state.keypoints)
-                if new_points != st.session_state.keypoints:
+                changed = False
+                # 比較はtuple同士で
+                for k in new_points:
+                    v_new = tuple(new_points[k])
+                    v_old = tuple(st.session_state.keypoints.get(k, (-1, -1)))
+                    if v_new != v_old:
+                        changed = True
+                        break
+                if changed:
                     st.session_state.keypoints = new_points
 
         with col_inputs:
@@ -394,9 +399,9 @@ if uploaded_file:
                     st.subheader("📊 最終分析結果")
                     col1, col2, col3 = st.columns(3)
                     values = [
-                        f"{front_angle:.1f}°" if front_angle else "測定不可",
-                        f"{rear_angle:.1f}°" if rear_angle else "測定不可", 
-                        f"{front_hip_angle:.1f}°" if front_hip_angle else "測定不可"
+                        f"{front_angle:.1f}°" if front_angle is not None else "測定不可",
+                        f"{rear_angle:.1f}°" if rear_angle is not None else "測定不可", 
+                        f"{front_hip_angle:.1f}°" if front_hip_angle is not None else "測定不可"
                     ]
                     labels = ["前足の膝角度", "後足の膝角度", "前足股関節角度"]
                     for i, (col, label, value, color) in enumerate(zip([col1, col2, col3], labels, values, colors)):
