@@ -345,10 +345,11 @@ if uploaded_file:
         with col_image:
             st.subheader("🎯 画像上の関節点（ドラッグで移動可）")
             objects = keypoints_to_canvas_objects(st.session_state.keypoints, joint_size)
+            # ↓↓↓★★★ ここでbackground_imageにimg_npを渡す！ ★★★↓↓↓
             canvas_result = st_canvas(
                 fill_color="rgba(255, 165, 0, 0.3)",
                 stroke_width=2,
-                background_image=img,
+                background_image=img_np,
                 update_streamlit=True,
                 height=h,
                 width=w,
