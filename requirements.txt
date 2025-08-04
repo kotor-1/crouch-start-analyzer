@@ -1,7 +1,7 @@
 streamlit
 numpy
 Pillow
-mediapipe==0.10.5
+mediapipe>=0.10.13
 opencv-python
 streamlit-drawable-canvas
 plotly>=5.0.0
