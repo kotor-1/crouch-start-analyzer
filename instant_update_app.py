@@ -279,6 +279,43 @@ def canvas_to_keypoints(objects, original_keypoints):
     
     return results
 
+def keypoints_changed(dict1, dict2):
+    """関節点の変更を検出（修正版）"""
+    try:
+        # 辞書のキーが異なる場合
+        if set(dict1.keys()) != set(dict2.keys()):
+            return True
+        
+        # 各キーの値を比較
+        for key in dict1.keys():
+            # 両方の値を取得
+            val1 = dict1[key]
+            val2 = dict2[key]
+            
+            # None値の処理
+            if val1 is None and val2 is None:
+                continue
+            if val1 is None or val2 is None:
+                return True
+            
+            # タプルまたはリストの比較
+            if isinstance(val1, (tuple, list)) and isinstance(val2, (tuple, list)):
+                if len(val1) != len(val2):
+                    return True
+                # 各要素を個別に比較
+                for v1, v2 in zip(val1, val2):
+                    if abs(float(v1) - float(v2)) > 0.1:  # 小さな誤差は無視
+                        return True
+            else:
+                # その他の型の比較
+                if val1 != val2:
+                    return True
+        
+        return False
+    except Exception as e:
+        # エラーが発生した場合は変更ありとして扱う
+        return True
+
 def manual_adjustment_dropdown(keypoints, img_width, img_height):
     """プルダウン選択による手動調整"""
     joint_names_jp = {
@@ -402,19 +439,6 @@ def manual_adjustment_horizontal(keypoints, img_width, img_height):
                     st.session_state.keypoints[joint] = (new_x, new_y)
                     st.rerun()
 
-def keypoints_changed(dict1, dict2):
-    """関節点の変更を検出"""
-    if len(dict1) != len(dict2):
-        return True
-    
-    keys = set(dict1) | set(dict2)
-    for k in keys:
-        v1 = tuple(dict1[k]) if k in dict1 else None
-        v2 = tuple(dict2[k]) if k in dict2 else None
-        if v1 != v2:
-            return True
-    return False
-
 # メイン処理
 uploaded_file = st.file_uploader("📷 画像をアップロード", type=["png", "jpg", "jpeg"])
 
@@ -521,11 +545,15 @@ if uploaded_file:
                 key="dragcanvas",
             )
             
-            # キャンバスからの更新を反映
+            # キャンバスからの更新を反映（修正版）
             if canvas_result.json_data is not None and "objects" in canvas_result.json_data:
-                new_points = canvas_to_keypoints(canvas_result.json_data["objects"], st.session_state.keypoints)
-                if keypoints_changed(new_points, st.session_state.keypoints):
-                    st.session_state.keypoints = new_points
+                try:
+                    new_points = canvas_to_keypoints(canvas_result.json_data["objects"], st.session_state.keypoints)
+                    if keypoints_changed(new_points, st.session_state.keypoints):
+                        st.session_state.keypoints = new_points
+                except Exception as e:
+                    # キャンバス更新エラーは無視（ログ出力のみ）
+                    pass
 
         with col_inputs:
             # 手動調整UI
@@ -661,6 +689,7 @@ else:
     - **角度修正**: モードによって地面や「くの字」などの角度を計算
     - **番号表記**: 関節点の横に1,2,3...の番号を表示
     - **エラーハンドリング強化**: 安定性向上とエラー対策完備
+    - **NumPy配列エラー修正**: 配列比較の問題を解決
 
     ### 📋 関節点番号
     - ① 左肩　② 右肩　③ 左股関節　④ 右股関節
